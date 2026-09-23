@@ -48,9 +48,15 @@ USER appuser
 # so the process has to start from inside backend/.
 WORKDIR /app/backend
 
+# Render (and most container hosts) inject the port to bind on via $PORT and
+# route external traffic to it. Locally nothing sets it, so 8000 stays the
+# default and docker-compose's 127.0.0.1:8000 mapping keeps working.
+ENV PORT=8000
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8000/api/health', timeout=4).status==200 else 1)"
+    CMD python -c "import os,urllib.request,sys; sys.exit(0 if urllib.request.urlopen(f\"http://127.0.0.1:{os.environ.get('PORT','8000')}/api/health\", timeout=4).status==200 else 1)"
 
-CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
+# Shell form on purpose: exec form would pass the literal string "$PORT" to
+# uvicorn instead of expanding it.
+CMD uvicorn app:app --host 0.0.0.0 --port ${PORT:-8000}

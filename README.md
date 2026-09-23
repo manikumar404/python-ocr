@@ -38,6 +38,44 @@ Two notes specific to the container:
 Verification state lives in memory, so restarting the container drops any in-progress sessions —
 fine for a demo, and called out again under "what this is not" below.
 
+## Deploying (Render)
+
+`render.yaml` in the repo root is a Render Blueprint that builds this same Dockerfile. Render is a
+container host, so the image runs as-is — nothing about the app changes for deployment.
+
+1. Push this repo to GitHub (it already lives at `manikumar404/python-ocr`).
+2. On [dashboard.render.com](https://dashboard.render.com) → **New** → **Blueprint**, pick the repo.
+   Render reads `render.yaml` and proposes one web service; approve it.
+3. First build takes several minutes (apt packages, OpenCV wheel, the 37MB model download).
+   When it goes live you get an `https://<name>.onrender.com` URL.
+
+The HTTPS that Render terminates for you is what makes this deployable at all: browser webcam
+access requires `localhost` or TLS, which is exactly why `docker-compose.yml` binds to `127.0.0.1`
+locally. On Render the camera step works from any machine.
+
+Two things to know before demoing it:
+
+- **Verification state is still an in-memory dict.** A redeploy, a crash, or Render restarting the
+  instance drops every in-progress session. Fine for a demo, and the same caveat as running locally.
+- **Sizing.** One in-flight verification peaks at roughly 280MB RSS with both ONNX models resident.
+  The blueprint asks for `starter` (512MB); bump it to `standard` (2GB) before putting several
+  people through the flow simultaneously.
+
+### Why not Vercel / Netlify / other serverless hosts
+
+They cannot run this, and the failure is not a configuration gap:
+
+- `pytesseract` is a wrapper around the `tesseract` **binary**, an apt package. Serverless Python
+  runtimes have no system package manager.
+- `opencv-contrib-python` links against `libGL`/`libglib`, which those runtimes do not ship.
+- The 808MB image is far past the ~250MB unzipped function limit these platforms enforce.
+- The in-memory session store assumes one long-lived process. Serverless invocations are ephemeral
+  and independent, so `start → document → challenge → liveness → result` would break as soon as two
+  requests landed on different instances.
+
+Any container host works instead — Fly.io, Railway, and Google Cloud Run all take this Dockerfile
+unchanged; only the `PORT` convention and the sizing knob differ.
+
 ## Quick start (local Python)
 
 ```bash

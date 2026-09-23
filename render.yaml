@@ -1,0 +1,30 @@
+# Render Blueprint for the Bhutan document + liveness verification prototype.
+#
+# This is a Docker deploy rather than one of Render's native Python runtimes
+# because the app needs two system packages that a plain `pip install` cannot
+# provide: the `tesseract` OCR binary behind pytesseract, and the libGL/libglib
+# libraries that opencv-contrib-python's wheel links against. The Dockerfile
+# already installs both, so Render just builds and runs it.
+services:
+  - type: web
+    name: bhutan-kyc-demo
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    # Closest Render region to Bhutan.
+    region: singapore
+
+    # Measured peak for one in-flight verification is ~280MB RSS (both ONNX
+    # models resident plus a decoded liveness clip), so starter's 512MB holds
+    # a single demo session with headroom. Move to `standard` (2GB) if several
+    # people will run the flow at the same time -- two concurrent liveness
+    # uploads would crowd 512MB. The `free` plan is also 512MB but spins down
+    # after 15 minutes idle, and waking an 808MB image makes the next visitor
+    # wait through a cold start, which is a poor look in front of stakeholders.
+    plan: starter
+
+    # /api/health is a plain 200 with no model loading, so Render can tell the
+    # process is up without waiting on the ~37MB SFace weights to page in.
+    healthCheckPath: /api/health
+
+    autoDeploy: true
