@@ -1,0 +1,10 @@
+services:
+  kyc:
+    build: .
+    image: bhutan-kyc-demo
+    ports:
+      # Bound to 127.0.0.1 on purpose: browser webcam access requires
+      # localhost or HTTPS, so exposing this on the LAN would only produce
+      # a page whose camera step silently fails.
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped

@@ -1,0 +1,17 @@
+# Docs aren't needed in the image
+README.md
+CLAUDE_CODE_PROMPT.md
+Dockerfile
+.dockerignore
+docker-compose.yml
+
+# The SFace model is fetched during the build; never ship a local copy into
+# the context (it's 37MB and would slow every build).
+backend/models/face_recognition_sface.onnx
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.git/
+.DS_Store

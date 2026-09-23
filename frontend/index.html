@@ -1,0 +1,329 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bhutan Document + Liveness Verification — Prototype</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --card:#ffffff; --border:#e2e5ea; --text:#1c2128; --muted:#5b6472;
+    --accent:#2f5fd6; --accent-ink:#ffffff;
+    --ok:#1a8a4a; --ok-bg:#e7f6ec;
+    --warn:#8a6d1a; --warn-bg:#fbf3df;
+    --bad:#b3261e; --bad-bg:#fbe9e8;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;padding-block:24px;padding-inline:16px;background:var(--bg);color:var(--text);
+       font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;}
+  .wrap{max-width:880px;margin:0 auto;}
+  h1{font-size:1.4rem;margin:0 0 4px}
+  .subtitle{color:var(--muted);font-size:.92rem;margin:0 0 16px}
+  .disclaimer{background:#fff8e6;border:1px solid #f0dca0;color:#6b5510;border-radius:10px;
+              padding:12px 14px;font-size:.85rem;line-height:1.45;margin-bottom:20px}
+  .card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:20px;margin-bottom:16px}
+  .card h2{font-size:1.05rem;margin:0 0 12px;display:flex;align-items:center;gap:8px}
+  .step-num{width:24px;height:24px;border-radius:50%;background:var(--accent);color:#fff;
+            display:inline-flex;align-items:center;justify-content:center;font-size:.8rem;flex:none}
+  .card.disabled{opacity:.5;pointer-events:none}
+  button{background:var(--accent);color:var(--accent-ink);border:none;border-radius:8px;
+         padding:10px 16px;font-size:.9rem;cursor:pointer;font-weight:600}
+  button:disabled{background:#aab3c2;cursor:not-allowed}
+  button.secondary{background:transparent;color:var(--accent);border:1px solid var(--accent)}
+  input[type=file]{font-size:.85rem}
+  .row{display:flex;gap:16px;flex-wrap:wrap;align-items:flex-start}
+  .col{flex:1;min-width:220px}
+  img.thumb{width:120px;height:120px;object-fit:cover;border-radius:10px;border:1px solid var(--border)}
+  video#preview{width:100%;max-width:360px;border-radius:10px;background:#000;display:block}
+  table.fields{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:8px}
+  table.fields td{padding:4px 6px;border-bottom:1px solid var(--border);vertical-align:top}
+  table.fields td:first-child{color:var(--muted);width:42%}
+  .flags{margin:8px 0 0;padding-left:18px;font-size:.82rem;color:#8a6d1a}
+  .prompt-overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+                  background:rgba(0,0,0,.35);color:#fff;font-size:1.3rem;font-weight:700;text-align:center;
+                  border-radius:10px;padding:16px}
+  .video-wrap{position:relative;width:100%;max-width:360px}
+  .badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:700}
+  .badge.pass{background:var(--ok-bg);color:var(--ok)}
+  .badge.fail{background:var(--bad-bg);color:var(--bad)}
+  .decision-banner{border-radius:12px;padding:18px;font-weight:700;font-size:1.1rem;margin-bottom:14px}
+  .decision-banner.APPROVED{background:var(--ok-bg);color:var(--ok)}
+  .decision-banner.MANUAL_REVIEW{background:var(--warn-bg);color:var(--warn)}
+  .decision-banner.REJECTED{background:var(--bad-bg);color:var(--bad)}
+  ul.reasons{margin:6px 0 0;padding-left:18px;font-size:.88rem}
+  .scorebar{height:10px;border-radius:6px;background:#e6e9ee;overflow:hidden;margin-top:6px}
+  .scorebar-fill{height:100%;background:var(--accent)}
+  .footer-note{color:var(--muted);font-size:.78rem;margin-top:24px;line-height:1.5}
+  a{color:var(--accent)}
+  .pill{display:inline-block;background:#eef1f6;border-radius:20px;padding:2px 10px;font-size:.75rem;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Document + Liveness Verification — Prototype</h1>
+  <p class="subtitle">Demo build for internal review. <span id="statusPill" class="pill">not started</span></p>
+
+  <div class="disclaimer">
+    <strong>What this prototype actually proves, and what it doesn't:</strong> this demonstrates the OCR →
+    active liveness challenge → face-match → decision pipeline end to end, running entirely on open-source
+    components (OpenCV YuNet/SFace, Tesseract). It has <em>no connection to any Bhutanese government
+    registry</em>, so it cannot confirm a document number is genuine or unrevoked — only that the image looks
+    plausible. Liveness uses head-turn / smile challenges only (no blink detection in this build), and the
+    anti-spoofing check is a soft heuristic, not a certified presentation-attack-detection model. Treat every
+    score on this page as a demo of the mechanism, not a production accuracy claim.
+  </div>
+
+  <div class="card" id="card1">
+    <h2><span class="step-num">1</span> Upload a document photo</h2>
+    <p style="color:var(--muted);font-size:.88rem;margin-top:-6px">CID, passport, or driving licence — front side, photo visible.</p>
+    <div class="row">
+      <div class="col">
+        <input type="file" id="docInput" accept="image/*">
+        <div style="margin-top:10px"><button id="analyzeBtn">Analyze document</button></div>
+        <div id="docStatus" style="margin-top:8px;font-size:.85rem;color:var(--muted)"></div>
+      </div>
+      <div class="col" id="docResultCol" style="display:none">
+        <div class="row">
+          <img id="docThumb" class="thumb" alt="detected face">
+          <table class="fields" id="docFields"></table>
+        </div>
+        <ul class="flags" id="docFlags"></ul>
+      </div>
+    </div>
+  </div>
+
+  <div class="card disabled" id="card2">
+    <h2><span class="step-num">2</span> Liveness check</h2>
+    <p style="color:var(--muted);font-size:.88rem;margin-top:-6px">
+      We'll walk you through a random sequence of actions on webcam — the randomness is what makes this
+      harder to spoof with a pre-recorded video than a fixed script would be. Each action is counted in
+      first and only recorded once the prompt says <strong>NOW</strong>, so take your time; the countdowns
+      and the pauses between actions aren't scored. Budget about half a minute.
+    </p>
+    <button id="startLivenessBtn">Start camera &amp; get challenge</button>
+    <div class="video-wrap" style="margin-top:12px">
+      <video id="preview" autoplay muted playsinline></video>
+      <div class="prompt-overlay" id="promptOverlay" style="display:none"></div>
+    </div>
+    <div id="livenessStatus" style="margin-top:8px;font-size:.85rem;color:var(--muted)"></div>
+  </div>
+
+  <div class="card disabled" id="card3">
+    <h2><span class="step-num">3</span> Result</h2>
+    <div id="resultBody"></div>
+  </div>
+
+  <div style="margin-top:8px">
+    <button class="secondary" id="resetBtn">Start a new verification</button>
+  </div>
+
+  <p class="footer-note">
+    Prototype only — see the accompanying README for the full list of simplifications, the production
+    architecture this demo is a slice of, and the Bhutan NDI integration path that would replace most of this
+    for anyone already enrolled in NDI.
+  </p>
+</div>
+
+<script>
+const API = ""; // same-origin
+let verificationId = null;
+let expectedSequence = null;
+let mediaStream = null;
+let mediaRecorder = null;
+let recordedChunks = [];
+
+const $ = (id) => document.getElementById(id);
+
+function setStatusPill(text) { $("statusPill").textContent = text; }
+
+async function ensureVerification() {
+  if (verificationId) return verificationId;
+  const res = await fetch("/api/verify/start", { method: "POST" });
+  const data = await res.json();
+  verificationId = data.verification_id;
+  return verificationId;
+}
+
+$("analyzeBtn").addEventListener("click", async () => {
+  const fileInput = $("docInput");
+  if (!fileInput.files.length) { $("docStatus").textContent = "Choose an image first."; return; }
+  $("docStatus").textContent = "Analyzing…";
+  await ensureVerification();
+  const form = new FormData();
+  form.append("file", fileInput.files[0]);
+  const res = await fetch(`/api/verify/${verificationId}/document`, { method: "POST", body: form });
+  if (!res.ok) { $("docStatus").textContent = "Error: " + (await res.text()); return; }
+  const data = await res.json();
+  $("docStatus").textContent = "Done.";
+  renderDocumentResult(data);
+  $("card2").classList.remove("disabled");
+  setStatusPill("document analyzed");
+});
+
+function renderDocumentResult(data) {
+  $("docResultCol").style.display = "block";
+  if (data.face_thumbnail) $("docThumb").src = data.face_thumbnail;
+  const f = data.fields || {};
+  const rows = [
+    ["Document type (guess)", f.document_type_guess],
+    ["Name (guess)", f.name_guess || "—"],
+    ["CID number (guess)", f.cid_number_guess || "—"],
+    ["Passport number (guess)", f.passport_number_guess || "—"],
+    ["Date found", f.date_guess || "—"],
+    ["MRZ checksum", data.mrz ? (data.mrz.checksum_valid ? "valid" : "invalid") : "n/a"],
+  ];
+  $("docFields").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
+  $("docFlags").innerHTML = (data.quality?.flags || []).map(f => `<li>${f}</li>`).join("");
+}
+
+$("startLivenessBtn").addEventListener("click", async () => {
+  $("livenessStatus").textContent = "Requesting camera…";
+  try {
+    mediaStream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 480 }, audio: false });
+  } catch (e) {
+    $("livenessStatus").textContent = "Camera access denied or unavailable: " + e.message;
+    return;
+  }
+  $("preview").srcObject = mediaStream;
+
+  const res = await fetch(`/api/verify/${verificationId}/challenge`);
+  const data = await res.json();
+  expectedSequence = data.sequence;
+
+  await runChallengeSequence(data.labels, data.sequence);
+});
+
+function wait(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function runChallengeSequence(labels, sequence) {
+  const overlay = $("promptOverlay");
+  overlay.style.display = "flex";
+  recordedChunks = [];
+  const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9")
+    ? "video/webm;codecs=vp9" : "video/webm";
+  mediaRecorder = new MediaRecorder(mediaStream, { mimeType });
+  mediaRecorder.ondataavailable = (e) => { if (e.data.size > 0) recordedChunks.push(e.data); };
+
+  // Timing. Every challenge gets its own countdown, then a scored window, then a
+  // rest — and the recorder is PAUSED for the countdown and the rest, so only the
+  // scored windows end up in the clip.
+  //
+  // Pausing is what makes generous prep time affordable. The backend splits the
+  // clip into equal-length segments, one per challenge, so any second of idle
+  // footage inside the recording would dilute a segment and drag the boundaries
+  // out of line with the actions. Paused time produces no frames, so the user can
+  // take as long as they need to get set without touching the scoring.
+  const COUNT_FROM = 3;
+  const COUNT_MS = 900;   // per countdown tick (not recorded)
+  const HOLD_MS = 4000;   // the scored window (recorded)
+  const REST_MS = 1200;   // breather between challenges (not recorded)
+  const perStepMs = COUNT_FROM * COUNT_MS + HOLD_MS + REST_MS;
+
+  // If pause/resume is unavailable the flow still works: every step has an
+  // identical structure and duration, so each one keeps occupying an equal slice
+  // of the recording either way. The only cost is diluted segments, and since the
+  // challenges are scored on the most extreme frame in their segment, extra
+  // neutral footage doesn't change the verdict.
+  const canPause = typeof mediaRecorder.pause === "function";
+
+  const finished = new Promise((resolve) => { mediaRecorder.onstop = resolve; });
+  const big = "font-size:1.15rem;font-weight:700;margin-top:8px";
+  const small = "font-size:.85rem;font-weight:400;margin-top:8px;opacity:.85";
+  const totalSecs = Math.round(labels.length * perStepMs / 1000);
+
+  overlay.innerHTML = `<div>Get ready<div style="${small}">${labels.length} actions, about ${totalSecs} seconds. Each one is counted in — wait for “NOW”.</div></div>`;
+  await wait(2000);
+
+  for (let i = 0; i < labels.length; i++) {
+    const step = `${i + 1}/${labels.length}`;
+    const isBaseline = sequence[i] === "neutral";
+    const cue = isBaseline ? "Hold still" : labels[i];
+
+    // --- Count in. Not recorded, so this costs the scoring nothing. ---
+    for (let n = COUNT_FROM; n >= 1; n--) {
+      overlay.innerHTML = `<div style="opacity:.8">${step} · Next<div style="${big}">${cue}</div><div style="${small}">starting in ${n}…</div></div>`;
+      await wait(COUNT_MS);
+    }
+
+    // --- The scored window. ---
+    if (mediaRecorder.state === "inactive") mediaRecorder.start();
+    else if (canPause) mediaRecorder.resume();
+
+    if (isBaseline) {
+      // Scored on an average, not a peak, and every later threshold is measured
+      // against it — so this window has to stay genuinely still.
+      overlay.innerHTML = `<div>${step} · NOW<div style="${big}">${labels[i]}</div><div style="${small}">Hold still — this sets the baseline</div></div>`;
+    } else {
+      overlay.innerHTML = `<div>${step} · NOW<div style="${big}">${labels[i]}</div><div style="${small}">…and hold it until the prompt changes</div></div>`;
+    }
+    await wait(HOLD_MS);
+
+    if (canPause) mediaRecorder.pause();
+
+    // --- Breather. Kept even after the last challenge so every step stays the
+    // --- same length, which is what the equal-segment split relies on.
+    overlay.innerHTML = `<div style="opacity:.8">${step} · Got it<div style="${small}">Relax a moment…</div></div>`;
+    await wait(REST_MS);
+  }
+  if (canPause && mediaRecorder.state === "paused") mediaRecorder.resume();
+  mediaRecorder.stop();
+  overlay.style.display = "none";
+  await finished;
+
+  const blob = new Blob(recordedChunks, { type: "video/webm" });
+  $("livenessStatus").textContent = "Uploading clip and scoring…";
+  const form = new FormData();
+  form.append("file", blob, "liveness.webm");
+  const res = await fetch(`/api/verify/${verificationId}/liveness`, { method: "POST", body: form });
+  if (!res.ok) { $("livenessStatus").textContent = "Error: " + (await res.text()); return; }
+  const result = await res.json();
+  $("livenessStatus").textContent = "Done.";
+  mediaStream.getTracks().forEach(t => t.stop());
+  setStatusPill("verification complete");
+  $("card3").classList.remove("disabled");
+  renderFinalResult(result.liveness, result.decision);
+}
+
+function renderFinalResult(liveness, decision) {
+  const chips = (liveness.challenge_results || []).map(r =>
+    `<span class="badge ${r.passed ? "pass" : "fail"}" style="margin-right:6px">${r.challenge}: ${r.passed ? "pass" : "fail"}</span>`
+  ).join("");
+
+  const score = liveness.match?.match_score;
+  const scorePct = score != null ? Math.max(0, Math.min(100, score * 100)) : 0;
+
+  $("resultBody").innerHTML = `
+    <div class="decision-banner ${decision.decision}">${decision.decision.replace("_", " ")}</div>
+    <div class="row">
+      <div class="col">
+        <strong>Face match score</strong>
+        <div class="scorebar"><div class="scorebar-fill" style="width:${scorePct}%"></div></div>
+        <div style="font-size:.85rem;color:var(--muted);margin-top:4px">
+          ${score != null ? score.toFixed(3) : "n/a"} (band: ${liveness.match?.band ?? "n/a"})
+        </div>
+      </div>
+      <div class="col">
+        <strong>Liveness challenges</strong>
+        <div style="margin-top:6px">${chips}</div>
+      </div>
+    </div>
+    <div style="margin-top:14px">
+      <strong>Reasons</strong>
+      <ul class="reasons">${(decision.reasons || []).map(r => `<li>${r}</li>`).join("")}</ul>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <div class="col">
+        <strong>Selfie frame used for matching</strong><br>
+        ${liveness.selfie_thumbnail ? `<img class="thumb" src="${liveness.selfie_thumbnail}">` : "n/a"}
+      </div>
+    </div>
+    <div style="margin-top:10px;font-size:.8rem;color:var(--muted)">
+      Motion std: ${liveness.motion_std?.toFixed?.(4) ?? "n/a"} · Spoof flag: ${liveness.spoof_flag} ·
+      Face detection rate across sampled frames: ${(liveness.face_detection_rate * 100).toFixed(0)}%
+    </div>
+  `;
+}
+
+$("resetBtn").addEventListener("click", () => window.location.reload());
+</script>
+</body>
+</html>
