@@ -14,14 +14,18 @@ services:
     # Closest Render region to Bhutan.
     region: singapore
 
-    # Measured peak for one in-flight verification is ~280MB RSS (both ONNX
-    # models resident plus a decoded liveness clip), so starter's 512MB holds
-    # a single demo session with headroom. Move to `standard` (2GB) if several
-    # people will run the flow at the same time -- two concurrent liveness
-    # uploads would crowd 512MB. The `free` plan is also 512MB but spins down
-    # after 15 minutes idle, and waking an 808MB image makes the next visitor
-    # wait through a cold start, which is a poor look in front of stakeholders.
-    plan: starter
+    # `free` is deliberate: a Blueprint only demands a payment method when it
+    # asks for a paid plan, so this keeps the deploy card-free. Free gives
+    # 512MB, and one in-flight verification peaks at ~280MB RSS (both ONNX
+    # models resident plus a decoded liveness clip), so a single demo session
+    # fits with headroom.
+    #
+    # What you trade away: free instances spin down after 15 minutes idle, and
+    # waking an 808MB image costs the next visitor roughly a minute. Before
+    # demoing, load the URL once to warm it. Two people running the flow at the
+    # same time would also crowd 512MB -- `standard` (2GB) is the fix, but it
+    # needs billing.
+    plan: free
 
     # /api/health is a plain 200 with no model loading, so Render can tell the
     # process is up without waiting on the ~37MB SFace weights to page in.

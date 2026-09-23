@@ -57,9 +57,12 @@ Two things to know before demoing it:
 
 - **Verification state is still an in-memory dict.** A redeploy, a crash, or Render restarting the
   instance drops every in-progress session. Fine for a demo, and the same caveat as running locally.
-- **Sizing.** One in-flight verification peaks at roughly 280MB RSS with both ONNX models resident.
-  The blueprint asks for `starter` (512MB); bump it to `standard` (2GB) before putting several
-  people through the flow simultaneously.
+- **Sizing and the free plan.** One in-flight verification peaks at roughly 280MB RSS with both
+  ONNX models resident, so the blueprint's `free` plan (512MB) holds a demo session comfortably.
+  Free instances spin down after 15 minutes idle and take about a minute to wake, so load the URL
+  once before demoing. Requesting a paid plan in `render.yaml` is also what makes Render ask for a
+  card at Blueprint time — `free` keeps the deploy card-free. Move to `standard` (2GB, billed) only
+  when several people need to run the flow at once.
 
 ### Why not Vercel / Netlify / other serverless hosts
 
