@@ -1,5 +1,12 @@
 # Render Blueprint for the Bhutan document + liveness verification prototype.
 #
+# NOTE: Blueprints are not listed among Render's free-tier features, and the
+# Blueprint flow prompts for a payment method. To deploy without a card,
+# create the service by hand from the dashboard using the settings below
+# (New -> Web Service, Language: Docker, Instance type: Free) -- see the
+# "Deploying (Render)" section of README.md. This file stays as the record of
+# that configuration and applies directly once billing is enabled.
+#
 # This is a Docker deploy rather than one of Render's native Python runtimes
 # because the app needs two system packages that a plain `pip install` cannot
 # provide: the `tesseract` OCR binary behind pytesseract, and the libGL/libglib

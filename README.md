@@ -40,14 +40,26 @@ fine for a demo, and called out again under "what this is not" below.
 
 ## Deploying (Render)
 
-`render.yaml` in the repo root is a Render Blueprint that builds this same Dockerfile. Render is a
-container host, so the image runs as-is — nothing about the app changes for deployment.
+Render is a container host, so this image runs as-is — nothing about the app changes to deploy it.
+
+Create the service **manually**, not from a Blueprint. Render's free tier covers web services, but
+Blueprints are not listed among the free-tier features and the Blueprint flow asks for a payment
+method. A hand-created web service on the free instance type does not.
 
 1. Push this repo to GitHub (it already lives at `manikumar404/python-ocr`).
-2. On [dashboard.render.com](https://dashboard.render.com) → **New** → **Blueprint**, pick the repo.
-   Render reads `render.yaml` and proposes one web service; approve it.
-3. First build takes several minutes (apt packages, OpenCV wheel, the 37MB model download).
-   When it goes live you get an `https://<name>.onrender.com` URL.
+2. [dashboard.render.com](https://dashboard.render.com) → **New** → **Web Service** → pick the repo.
+3. Set these in the form:
+   - **Language**: `Docker` (Render detects the Dockerfile; do not pick Python — the app needs apt
+     packages that a native Python runtime cannot install)
+   - **Branch**: `main`
+   - **Region**: Singapore (closest to Bhutan)
+   - **Instance type**: `Free`
+   - **Advanced → Health Check Path**: `/api/health`
+4. **Create Web Service**. First build takes several minutes (apt packages, OpenCV wheel, the 37MB
+   model download). When it goes live you get an `https://<name>.onrender.com` URL.
+
+`render.yaml` is kept in the repo as an accurate record of that configuration, and works directly if
+you ever have billing enabled — but the dashboard form above is the card-free route.
 
 The HTTPS that Render terminates for you is what makes this deployable at all: browser webcam
 access requires `localhost` or TLS, which is exactly why `docker-compose.yml` binds to `127.0.0.1`
@@ -57,12 +69,10 @@ Two things to know before demoing it:
 
 - **Verification state is still an in-memory dict.** A redeploy, a crash, or Render restarting the
   instance drops every in-progress session. Fine for a demo, and the same caveat as running locally.
-- **Sizing and the free plan.** One in-flight verification peaks at roughly 280MB RSS with both
-  ONNX models resident, so the blueprint's `free` plan (512MB) holds a demo session comfortably.
-  Free instances spin down after 15 minutes idle and take about a minute to wake, so load the URL
-  once before demoing. Requesting a paid plan in `render.yaml` is also what makes Render ask for a
-  card at Blueprint time — `free` keeps the deploy card-free. Move to `standard` (2GB, billed) only
-  when several people need to run the flow at once.
+- **Sizing.** One in-flight verification peaks at roughly 280MB RSS with both ONNX models resident,
+  so the free instance type (512MB) holds a demo session comfortably. Free instances spin down after
+  15 minutes idle and take about a minute to wake, so load the URL once before demoing. Two people
+  running the flow simultaneously would crowd 512MB; that is the point to consider a paid plan.
 
 ### Why not Vercel / Netlify / other serverless hosts
 
