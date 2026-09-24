@@ -136,11 +136,73 @@ A five-minute walkthrough that demonstrates the real mechanism, not a canned vid
    during one challenge, or looking away), not just an approval. Stakeholders should see the review
    path exists, since that's the honest answer to "what happens with a 12-year-old ID photo."
 
+## Supported documents
+
+`backend/documents.py` identifies the document from what's printed on it (its title, field labels,
+number formats, MRZ), then re-reads the ID number from a targeted crop. Photos can be sideways or
+upside down: the portrait photo is always printed upright on the card, so the rotation where the
+face detector finds an upright face is used.
+
+| Document | Extracted | How it's checked |
+|---|---|---|
+| Work permit (current and older design) | Permit no., issue / expiry dates | Number = dzongkhag prefix + processing date (YYMMDD) + serial, and its date must be near the printed issue date |
+| Student / trader / dependent permit, immigration card | `SP`/`TP`/`DP`/`MC` number, issue / expiry dates | Type-specific format |
+| CID card, front | Citizenship ID No. | `1` + dzongkhag (01–20) + 8 digits |
+| CID card, back | Card no. (`B`/`C` + 10 digits), household no., issue / expiry dates | Format; household no. starts with the dzongkhag code |
+| Special residence permit | SRP No. (front), issue / expiry dates (back) | `3` + dzongkhag + 8 digits |
+| Driving licence | Licence no., CID, issue / expiry dates | Format |
+| Voter photo ID | Citizen ID No. | As CID |
+| Bhutan passport | Passport no., CID, birth / issue / expiry dates | MRZ check digits (the CID is the MRZ personal number) |
+| Foreign passport | Passport no., nationality, birth / issue / expiry dates | MRZ check digits |
+| Hong Kong ID, German ID, Aadhaar | ID no. | HKID check digit, MRZ, Verhoeff |
+
+Dates are returned as `YYYY-MM-DD`. Permit dates are voted across several OCR readings and must be in
+order and at most 3 years apart. CID cards, SRP cards and passports in the samples all expire exactly
+5 or 10 years after issue, minus a day (the licence: exactly 10 years), so an issue/expiry pair read
+that far apart confirms both. A passport's MRZ has no issue date, so it's taken from the printed page:
+the date one validity term before the check-digit-confirmed expiry. A document whose expiry date has
+passed is flagged as expired, which routes it to manual review.
+
+Anything else (bank cards, loyalty cards, forms) is reported as *not a supported document*.
+
+Every number comes back with a status: **verified** (several OCR readings agreed, or a check digit
+confirmed it), **check manually** (read but not confirmed), or **not found**. Anything short of
+verified adds a flag, which routes the verification to manual review rather than approval.
+
+**Measured accuracy** on 176 sample photos (real phone photos and scans, many rotated or blurry):
+document type correct for 172 (the four misses are two scans too blurred to read by eye and two card
+backs with no readable text). Against 442 hand-checked numbers and dates, 352 were read correctly,
+17 wrongly and 73 not found — and of the values marked *verified*, 1 was wrong. The previous
+generic OCR identified the type correctly for 30 of the 176.
+
+The QR codes printed on the work, student and dependent permits in the samples all decode to the
+same placeholder URL (`http://www.qrstuff.com/`), so they carry nothing that can be checked.
+
+### Re-measuring accuracy
+
+The sample photos live in `doc samples/`, which is git-ignored because they are real people's IDs.
+With `labels.csv` (type of each image) and `ground_truth.json` (hand-checked numbers) in that
+folder:
+
+```bash
+.venv/bin/python tools/evaluate_documents.py          # all samples
+SHOW=1 .venv/bin/python tools/evaluate_documents.py   # also list every wrong reading
+```
+
+Run it after any change to `documents.py`; the number that matters most is *wrong but marked
+verified*.
+
+### Speed
+
+Reading a document takes about 1.6 s on one core of a laptop (90% under 2.5 s, worst case ~10 s):
+several OCR passes run instead of one. Render's free instance has only a fraction of a CPU, so
+expect roughly ten times that there; a paid instance with a full CPU brings it back to laptop speed.
+
 ## Architecture map (what's in this repo vs. the full design)
 
 | Pipeline stage | This prototype | Full design notes |
 |---|---|---|
-| Document OCR | Tesseract + regex field-guessing, generic across doc types | Same idea, with per-generation CID template regions and dedicated MRZ parsing |
+| Document OCR | Tesseract with per-type identification, targeted number crops, multi-read voting and MRZ parsing (see [Supported documents](#supported-documents)) | Same idea, with template homography for each card generation |
 | Document authenticity | Blur/resolution check + MRZ checksum only | Adds ELA tamper detection, template homography, screen-recapture detection |
 | Liveness | Active challenge (head-turn/smile) scored from OpenCV's 5-point face landmarks | Adds MediaPipe Face Mesh for real blink/EAR detection and a certified/production-grade passive anti-spoofing model |
 | Face match | OpenCV SFace (cosine similarity) | InsightFace/ArcFace or a commercial vendor, chosen after checking model licensing |
@@ -173,9 +235,12 @@ A five-minute walkthrough that demonstrates the real mechanism, not a canned vid
 ```
 backend/
   app.py            FastAPI routes + in-memory verification store
-  vision.py         OCR, face detection/matching, liveness scoring, decision engine
+  documents.py      Document-type identification and ID-number extraction
+  vision.py         Face detection/matching, liveness scoring, decision engine
   models/           YuNet + SFace ONNX weights (bundled, Apache-2.0)
   requirements.txt
 frontend/
   index.html        Single-page demo UI (vanilla JS, no build step, no external calls)
+tools/
+  evaluate_documents.py   Accuracy report against the (git-ignored) sample set
 ```

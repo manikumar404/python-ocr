@@ -5,7 +5,8 @@ IMPORTANT — read this before treating any number here as gospel:
 This is a PROTOTYPE built to demonstrate the pipeline end-to-end, not a
 certified identity-verification product. Specifically:
 
-- Document "authenticity" is limited to OCR + a few structural heuristics.
+- Document "authenticity" is limited to OCR + a few structural heuristics
+  (see documents.py for how types are identified and numbers validated).
   There is no connection to any Bhutanese government registry, so this can
   never actually confirm a CID/passport/licence number is real or unrevoked.
 - Liveness uses the 5-point landmarks that come back from OpenCV's YuNet
@@ -21,15 +22,16 @@ certified identity-verification product. Specifically:
 """
 import base64
 import random
-import re
 import sys
 import tempfile
 import urllib.request
+from datetime import date
 from pathlib import Path
 
 import cv2
 import numpy as np
-import pytesseract
+
+import documents
 
 MODELS_DIR = Path(__file__).parent / "models"
 
@@ -122,71 +124,7 @@ def _encode_jpg_b64(bgr_image):
     return "data:image/jpeg;base64," + base64.b64encode(buf.tobytes()).decode()
 
 
-# ---- Document OCR + field-guessing heuristics -------------------------------
-
-CID_RE = re.compile(r"\b\d{11}\b")
-PASSPORT_RE = re.compile(r"\b[A-Z]{1,2}\d{6,7}\b")
-DATE_RE = re.compile(r"\b(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4}|\d{4}[\/\-.]\d{1,2}[\/\-.]\d{1,2})\b")
-MRZ_LINE_RE = re.compile(r"[A-Z0-9<]{20,}")
-
-_MRZ_WEIGHTS = [7, 3, 1]
-_MRZ_VALUES = {c: i for i, c in enumerate("0123456789")}
-_MRZ_VALUES.update({c: i + 10 for i, c in enumerate("ABCDEFGHIJKLMNOPQRSTUVWXYZ")})
-_MRZ_VALUES["<"] = 0
-
-
-def _mrz_check_digit(data: str) -> int:
-    total = 0
-    for i, ch in enumerate(data):
-        total += _MRZ_VALUES.get(ch, 0) * _MRZ_WEIGHTS[i % 3]
-    return total % 10
-
-
-def guess_document_type(raw_text: str) -> str:
-    t = raw_text.upper()
-    if "PASSPORT" in t or MRZ_LINE_RE.search(t):
-        return "passport"
-    if "DRIVING" in t or "LICENCE" in t or "LICENSE" in t:
-        return "driving_license"
-    if "CITIZENSHIP" in t or "KINGDOM OF BHUTAN" in t or CID_RE.search(t):
-        return "cid"
-    return "unknown"
-
-
-def guess_name(raw_text: str):
-    banned = ("KINGDOM", "BHUTAN", "DEPARTMENT", "CARD", "LICENCE", "LICENSE",
-              "PASSPORT", "CIVIL", "REGISTRATION", "CENSUS", "IDENTITY",
-              "GOVERNMENT", "MINISTRY")
-    best = None
-    for line in raw_text.splitlines():
-        clean = line.strip()
-        letters = re.sub(r"[^A-Za-z ]", "", clean)
-        if len(letters) < 4:
-            continue
-        if any(b in clean.upper() for b in banned):
-            continue
-        upper_ratio = sum(1 for c in letters if c.isupper()) / max(len(letters.replace(" ", "")), 1)
-        if upper_ratio > 0.8 and (best is None or len(clean) > len(best)):
-            best = clean
-    return best
-
-
-def try_validate_mrz(raw_text: str):
-    """Very small subset of ICAO 9303 TD3 check-digit validation, best-effort."""
-    candidates = [l.strip().replace(" ", "") for l in raw_text.splitlines()]
-    candidates = [l for l in candidates if MRZ_LINE_RE.fullmatch(l or "")]
-    if len(candidates) < 2:
-        return None
-    line2 = candidates[1] if len(candidates) > 1 else candidates[0]
-    if len(line2) < 10:
-        return None
-    doc_number = line2[0:9]
-    check_digit = line2[9:10]
-    if not check_digit.isdigit():
-        return None
-    computed = _mrz_check_digit(doc_number)
-    return {"mrz_line_found": True, "checksum_valid": computed == int(check_digit)}
-
+# ---- Document analysis -------------------------------------------------------
 
 def analyze_document_image(image_bytes: bytes) -> dict:
     arr = np.frombuffer(image_bytes, dtype=np.uint8)
@@ -203,23 +141,27 @@ def analyze_document_image(image_bytes: bytes) -> dict:
     if min(h, w) < 400:
         quality_flags.append("Resolution is low — extraction may be unreliable")
 
-    raw_text = pytesseract.image_to_string(gray)
-    doc_type = guess_document_type(raw_text)
-    fields = {
-        "document_type_guess": doc_type,
-        "cid_number_guess": next(iter(CID_RE.findall(raw_text)), None),
-        "passport_number_guess": next(iter(PASSPORT_RE.findall(raw_text)), None),
-        "date_guess": next(iter(DATE_RE.findall(raw_text)), None),
-        "name_guess": guess_name(raw_text),
-    }
-    mrz = try_validate_mrz(raw_text) if doc_type == "passport" else None
+    # Identification and extraction also rotate the photo upright; the face
+    # is taken from that upright image, because the face detector can't find
+    # a face that's lying on its side.
+    upright, face_row, doc = documents.read_document(img, _detect_best_face)
 
-    face_row = _detect_best_face(img)
+    if doc["document_type"] is None:
+        quality_flags.append("Document type not recognised — upload a supported ID (CID, passport, "
+                             "licence, or a Bhutan permit/immigration card)")
+    expiry = doc["fields"].get("expiry_date")
+    if expiry and date.fromisoformat(expiry) < date.today():
+        quality_flags.append(f"Document expired on {expiry}")
+    unsure = [k for k, st in doc["field_checks"].items() if st in ("needs_review", "checksum_failed")]
+    if unsure:
+        quality_flags.append("Could not read with confidence: " + ", ".join(k.replace("_", " ") for k in unsure)
+                             + " — check against the document")
+
     face_thumbnail = None
     embedding = None
     if face_row is not None:
         _, recognizer = get_models()
-        aligned = recognizer.alignCrop(img, face_row)
+        aligned = recognizer.alignCrop(upright, face_row)
         embedding = recognizer.feature(aligned)
         face_thumbnail = _encode_jpg_b64(aligned)
     else:
@@ -227,9 +169,13 @@ def analyze_document_image(image_bytes: bytes) -> dict:
 
     return {
         "quality": {"blur_score": blur, "width": w, "height": h, "flags": quality_flags},
-        "raw_text_preview": raw_text.strip()[:500],
-        "fields": fields,
-        "mrz": mrz,
+        "document_type": doc["document_type"],
+        "document_label": doc["document_label"],
+        "rotation_applied": doc["rotation_applied"],
+        "fields": doc["fields"],
+        "field_checks": doc["field_checks"],
+        "mrz": doc["mrz"],
+        "raw_text_preview": doc["raw_text"][:500],
         "face_found": face_row is not None,
         "face_thumbnail": face_thumbnail,
         "_embedding": embedding,  # server-side only, stripped before sending to client

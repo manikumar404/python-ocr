@@ -45,6 +45,7 @@
   .badge{display:inline-block;padding:2px 8px;border-radius:6px;font-size:.75rem;font-weight:700}
   .badge.pass{background:var(--ok-bg);color:var(--ok)}
   .badge.fail{background:var(--bad-bg);color:var(--bad)}
+  .badge.warn{background:var(--warn-bg);color:var(--warn)}
   .decision-banner{border-radius:12px;padding:18px;font-weight:700;font-size:1.1rem;margin-bottom:14px}
   .decision-banner.APPROVED{background:var(--ok-bg);color:var(--ok)}
   .decision-banner.MANUAL_REVIEW{background:var(--warn-bg);color:var(--warn)}
@@ -74,7 +75,7 @@
 
   <div class="card" id="card1">
     <h2><span class="step-num">1</span> Upload a document photo</h2>
-    <p style="color:var(--muted);font-size:.88rem;margin-top:-6px">CID, passport, or driving licence — front side, photo visible.</p>
+    <p style="color:var(--muted);font-size:.88rem;margin-top:-6px">CID card (front or back), passport, driving licence, voter ID, special residence permit, or a Bhutan work / student / trader / dependent permit or immigration card. The photo can be sideways or upside down.</p>
     <div class="row">
       <div class="col">
         <input type="file" id="docInput" accept="image/*">
@@ -159,20 +160,50 @@ $("analyzeBtn").addEventListener("click", async () => {
   setStatusPill("document analyzed");
 });
 
+const FIELD_LABELS = {
+  name: "Name",
+  cid_number: "CID number",
+  permit_number: "Permit number",
+  card_number: "Card number",
+  household_number: "Household number",
+  srp_number: "SRP number",
+  license_number: "Licence number",
+  passport_number: "Passport number",
+  id_number: "ID number",
+  aadhaar_number: "Aadhaar number",
+  nationality: "Nationality (MRZ)",
+  date_of_birth: "Date of birth",
+  issue_date: "Issue date",
+  expiry_date: "Expiry date",
+};
+// How each value was checked; see field_checks in documents.py.
+const CHECK_BADGES = {
+  checksum_ok: ["pass", "check digit ✓"],
+  format_ok: ["pass", "verified"],
+  needs_review: ["warn", "check manually"],
+  checksum_failed: ["fail", "check digit ✗"],
+  unchecked: ["", ""],
+  not_found: ["fail", "not found"],
+};
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({"&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"}[c]));
+}
+
 function renderDocumentResult(data) {
   $("docResultCol").style.display = "block";
   if (data.face_thumbnail) $("docThumb").src = data.face_thumbnail;
   const f = data.fields || {};
-  const rows = [
-    ["Document type (guess)", f.document_type_guess],
-    ["Name (guess)", f.name_guess || "—"],
-    ["CID number (guess)", f.cid_number_guess || "—"],
-    ["Passport number (guess)", f.passport_number_guess || "—"],
-    ["Date found", f.date_guess || "—"],
-    ["MRZ checksum", data.mrz ? (data.mrz.checksum_valid ? "valid" : "invalid") : "n/a"],
-  ];
+  const checks = data.field_checks || {};
+  const rows = [["Document", escapeHtml(data.document_label || "—")]];
+  if (data.rotation_applied) rows.push(["Rotation corrected", `${data.rotation_applied}°`]);
+  for (const [key, value] of Object.entries(f)) {
+    const [cls, text] = CHECK_BADGES[checks[key]] || ["", ""];
+    const badge = text ? ` <span class="badge ${cls}">${text}</span>` : "";
+    rows.push([FIELD_LABELS[key] || key, (value ? escapeHtml(value) : "—") + badge]);
+  }
   $("docFields").innerHTML = rows.map(([k, v]) => `<tr><td>${k}</td><td>${v}</td></tr>`).join("");
-  $("docFlags").innerHTML = (data.quality?.flags || []).map(f => `<li>${f}</li>`).join("");
+  $("docFlags").innerHTML = (data.quality?.flags || []).map(f => `<li>${escapeHtml(f)}</li>`).join("");
 }
 
 $("startLivenessBtn").addEventListener("click", async () => {

@@ -1,0 +1,9 @@
+# Real identity documents used to develop the OCR. Never commit them.
+doc samples/
+
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.DS_Store
+backend/models/face_recognition_sface.onnx
