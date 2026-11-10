@@ -15,11 +15,22 @@ The container already contains Tesseract, OpenCV's shared libraries, and **both*
 this is the shortest path to a working demo and needs nothing installed but Docker:
 
 ```bash
-docker compose up --build          # first build takes a few minutes
-# then open http://localhost:8000 in Chrome or Firefox (needs a webcam)
+echo "DUCKDNS_TOKEN=<your-duckdns-token>" > .env
+docker compose up -d --build       # first build takes a few minutes
+# then open https://kyc.ingreslab.duckdns.org in Chrome or Firefox (needs a webcam)
 ```
 
-Or without Compose:
+Compose runs three services:
+
+- `traefik` — terminates TLS for `*.ingreslab.duckdns.org` using a Let's Encrypt wildcard cert
+  (DuckDNS DNS challenge, stored in `./letsencrypt/`). HTTP redirects to HTTPS. Its dashboard is
+  on `127.0.0.1:8080` and at `https://ingreslab.duckdns.org`.
+- `kyc-frontend` — nginx serving `frontend/index.html` at `kyc.ingreslab.duckdns.org` and proxying
+  `/api/*` to the backend (config in `frontend/nginx.conf`, upload limit raised to 50MB).
+- `kyc-api` — the FastAPI backend, built from the root `Dockerfile`. Only reachable through the
+  nginx proxy.
+
+Or run the backend alone without Compose (it serves the page itself on port 8000):
 
 ```bash
 docker build -t bhutan-kyc-demo .

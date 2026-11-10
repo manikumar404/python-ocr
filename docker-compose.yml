@@ -1,10 +1,78 @@
+version: "2.4"
+
 services:
-  kyc:
-    build: .
-    image: bhutan-kyc-demo
+  traefik:
+    image: traefik:v3.2
+    environment:
+      # Read from .env next to this file (kept out of git) so the token is
+      # never committed.
+      - DUCKDNS_TOKEN=${DUCKDNS_TOKEN}
+    command:
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --entrypoints.web.address=:80
+      - --entrypoints.websecure.address=:443
+      - --entrypoints.web.http.redirections.entrypoint.to=websecure
+      - --entrypoints.web.http.redirections.entrypoint.scheme=https
+      - --certificatesresolvers.duck.acme.email=mgkums@gmail.com
+      - --certificatesresolvers.duck.acme.storage=/letsencrypt/acme.json
+      - --certificatesresolvers.duck.acme.dnschallenge=true
+      - --certificatesresolvers.duck.acme.dnschallenge.provider=duckdns
+      - --certificatesresolvers.duck.acme.dnschallenge.delaybeforecheck=30
+      - --api.dashboard=true
+      - --api.insecure=true
+      - --log.level=INFO
     ports:
-      # Bound to 127.0.0.1 on purpose: browser webcam access requires
-      # localhost or HTTPS, so exposing this on the LAN would only produce
-      # a page whose camera step silently fails.
-      - "127.0.0.1:8000:8000"
+      - "80:80"
+      - "443:443"
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./letsencrypt:/letsencrypt
     restart: unless-stopped
+    mem_limit: 128m
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.wildcard.rule=Host(`ingreslab.duckdns.org`)
+      - traefik.http.routers.wildcard.entrypoints=websecure
+      - traefik.http.routers.wildcard.tls=true
+      - traefik.http.routers.wildcard.tls.certresolver=duck
+      - traefik.http.routers.wildcard.tls.domains[0].main=ingreslab.duckdns.org
+      - traefik.http.routers.wildcard.tls.domains[0].sans=*.ingreslab.duckdns.org
+      - traefik.http.routers.wildcard.service=api@internal
+
+  # FastAPI backend (OCR, face matching, liveness). Built from the root
+  # Dockerfile, which is also what Render uses. Not exposed through Traefik:
+  # the browser reaches it only via the frontend's nginx /api proxy.
+  kyc-api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: bhutan-kyc-demo-api
+    expose:
+      - "8000"
+    networks:
+      default:
+        # nginx.conf proxies to http://api:8000
+        aliases:
+          - api
+    restart: unless-stopped
+
+  # nginx serving frontend/index.html and proxying /api/* to kyc-api.
+  # Served over HTTPS by Traefik -- browsers only allow webcam access on
+  # HTTPS (or localhost), so the TLS settings below are required.
+  kyc-frontend:
+    build:
+      context: ./frontend
+    image: bhutan-kyc-demo-frontend
+    depends_on:
+      kyc-api:
+        condition: service_healthy
+    restart: unless-stopped
+    labels:
+      - traefik.enable=true
+      - traefik.http.routers.kyc.rule=Host(`kyc.ingreslab.duckdns.org`)
+      - traefik.http.routers.kyc.entrypoints=websecure
+      - traefik.http.routers.kyc.tls=true
+      - traefik.http.routers.kyc.tls.certresolver=duck
+      - traefik.http.services.kyc.loadbalancer.server.port=80
